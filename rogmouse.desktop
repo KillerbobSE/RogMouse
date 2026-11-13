@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=RogMouse
+Comment=Battery indicator for the ASUS ROG Keris II Origin
+Exec=rogmouse
+Icon=input-mouse
+Terminal=false
+Categories=Utility;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true

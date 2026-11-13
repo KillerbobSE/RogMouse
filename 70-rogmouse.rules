@@ -1,0 +1,4 @@
+# RogMouse: let the logged-in user talk to the ASUS ROG Omni Receiver and the
+# Keris II Origin (wired) over hidraw, so the tray can read the battery.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0b05", ATTRS{idProduct}=="1ace", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0b05", ATTRS{idProduct}=="1c0c", TAG+="uaccess"
