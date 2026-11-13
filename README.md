@@ -55,6 +55,8 @@ model), sleep timer, keyboard-key/macro button bindings. Wired mode (0b05:1c0c) 
 - If tray icons vanish after a panel crash: `pkill -x cosmic-panel`, then restart the tray apps.
   Don't kill a single `cosmic-applet-status-area` — the panel won't respawn it.
 - Launching RogMouse while it's already running just exits (single instance).
+- Follows the desktop light/dark setting via xdg-desktop-portal. If `QT_QPA_PLATFORMTHEME` names
+  a theme Qt 6 can't load (e.g. `qt5ct`), the built-in portal theme is used instead.
 
 ## Credits
 

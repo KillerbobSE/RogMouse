@@ -555,6 +555,21 @@ def cli() -> None:
         sys.exit(str(e))
 
 
+def follow_desktop_theme() -> None:
+    """Follow the desktop's light/dark setting (COSMIC, GNOME, KDE via xdg-desktop-portal).
+
+    Qt 6 only reads the colour scheme through a platform-theme plugin. Many
+    setups export QT_QPA_PLATFORMTHEME=qt5ct, which Qt 6 can't load, leaving
+    dialogs light. If the configured theme isn't available, use Qt's built-in
+    portal theme, which also switches live. Must run before QApplication.
+    """
+    import PySide6
+    plugins = Path(PySide6.__file__).parent / "Qt" / "plugins" / "platformthemes"
+    available = {f.name[len("libq"):-len(".so")] for f in plugins.glob("libq*.so")}
+    if os.environ.get("QT_QPA_PLATFORMTHEME", "") not in available and "xdgdesktopportal" in available:
+        os.environ["QT_QPA_PLATFORMTHEME"] = "xdgdesktopportal"
+
+
 def main() -> None:
     if "--once" in sys.argv or "--all" in sys.argv:
         cli()
@@ -568,7 +583,9 @@ def main() -> None:
     except OSError:
         sys.exit("RogMouse is already running")
 
+    follow_desktop_theme()
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
     app.setApplicationName(APP_NAME)
     app.setDesktopFileName("rogmouse")
     app.setQuitOnLastWindowClosed(False)
