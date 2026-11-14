@@ -15,7 +15,8 @@ on a Keris II Origin (write → read back → restore):
     0x0012 profile info  raw[10]=profile index  raw[11]=active DPI preset (1-based)
     0x0412 p0=2  DPI     raw[4+4i:6+4i]=x, raw[6+4i:8+4i]=y   (value*50+50)
     0x0412 p0=0  setting raw[14]=debounce index  raw[16]=angle snapping
-    0x0312 p0=0  LED     raw[4]=mode raw[5]=brightness 0-100 raw[6:9]=RGB
+    0x0312 p0=led LED    raw[4]=mode raw[5]=brightness 0-100 raw[6:9]=RGB
+                         (led 0-2; zones 1 and 2 are the wheel and side, 3+ doesn't answer)
     0x0512 p0=0  buttons raw[4+2i]=action code, raw[5+2i]=action type
     0x3151 set setting   p0=field (0-3 DPI preset, 5 debounce, 6 snapping), p2..=value
     0x2851 set LED       p0=led, p2=mode, p3=brightness, p4-6=RGB
@@ -69,6 +70,20 @@ LED_MODES = {           # index → name (ASUS order)
     6: "Battery level",
 }
 LED_MODES_WITH_COLOR = {0, 1, 4}
+LED_STATIC = 0
+NUM_LEDS = 3                # lighting zones, all set together
+
+
+def battery_rgb(pct: int) -> tuple[int, int, int]:
+    """Smooth green → yellow → red for a battery percentage.
+
+    Hue runs from 120° (green) at >=90 % through 60° (yellow) at 50 % to 0°
+    (red) at <=10 %, at full saturation/value so the LEDs stay vivid.
+    """
+    t = min(1.0, max(0.0, (pct - 10) / 80))
+    if t >= 0.5:                     # yellow → green: drop red
+        return round(255 * (1 - t) * 2), 255, 0
+    return 255, round(255 * t * 2), 0  # red → yellow: add green
 
 # Physical buttons in slot order, identified by their default action code.
 BUTTONS = [
@@ -133,7 +148,8 @@ class State:
     active_dpi: int                      # 0-based index, -1 unknown
     debounce_ms: int
     snapping: bool
-    led: Led
+    led: Led                             # zone 0 (shown in the menu)
+    leds: list[Led] = field(default_factory=list)      # every zone
     buttons: list[int] = field(default_factory=list)   # action code per slot
 
     @property
@@ -233,7 +249,10 @@ class Mouse:
         prof = self.query(CMD_GET_PROFILE)
         xy = self.query(CMD_GET_SETTINGS, 2)
         s0 = self.query(CMD_GET_SETTINGS, 0)
-        led = self.query(CMD_GET_LED, 0)
+        leds = []
+        for i in range(NUM_LEDS):
+            r = self.query(CMD_GET_LED, i)
+            leds.append(Led(r[4], r[5], (r[6], r[7], r[8])))
         btn = self.query(CMD_GET_BUTTONS, 0)
         dpi = [int.from_bytes(xy[4 + 4 * i:6 + 4 * i], "little") * 50 + 50 for i in range(NUM_DPI)]
         deb = s0[14]
@@ -243,7 +262,8 @@ class Mouse:
             active_dpi=prof[11] - 1 if prof[11] else -1,
             debounce_ms=DEBOUNCE_MS[deb] if deb < len(DEBOUNCE_MS) else -1,
             snapping=bool(s0[16]),
-            led=Led(led[4], led[5], (led[6], led[7], led[8])),
+            led=leds[0],
+            leds=leds,
             buttons=[btn[4 + 2 * i] for i in range(len(BUTTONS))],
         )
 
@@ -274,7 +294,8 @@ class Mouse:
     def set_led(self, mode: int, brightness: int, rgb: tuple[int, int, int]) -> None:
         if mode not in LED_MODES or not 0 <= brightness <= 100:
             raise ValueError("bad LED setting")
-        self.query(CMD_SET_LED, 0, 0, mode, brightness, *rgb)
+        for i in range(NUM_LEDS):
+            self.query(CMD_SET_LED, i, 0, mode, brightness, *rgb)
         self.save()
 
     def set_button(self, slot: int, action: int) -> None:

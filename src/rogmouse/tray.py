@@ -24,12 +24,14 @@ from . import protocol as P
 
 APP_NAME = "RogMouse"
 CONFIG = Path.home() / ".config" / "rogmouse" / "config.json"
-DEFAULTS = {"interval_min": 5, "low_alert": 20}
+DEFAULTS = {"interval_min": 5, "low_alert": 20, "battery_led": False}
 INTERVALS = (1, 5, 15, 30)
 ALERTS = (0, 10, 20, 30)
 RETRY_ASLEEP_S = 60          # asleep: try again sooner than the normal interval
 STATE_MAX_AGE_S = 20         # re-read settings when the menu opens after this
 DPI_CHOICES = (400, 800, 1000, 1200, 1600, 2000, 2400, 3200, 4000, 6400, 8000, 12000, 16000, 26000, 42000)
+BATTERY_LIFE = -1            # app-driven effect: static colour follows the battery
+BATTERY_LIFE_LABEL = "Battery life (green → yellow → red)"
 BRIGHTNESS = ((0, "Off"), (25, "25%"), (50, "50%"), (75, "75%"), (100, "100%"))
 
 
@@ -176,6 +178,7 @@ class Tray(QObject):
         self.state: P.State | None = None
         self.state_time = 0.0
         self.state_error = "Reading settings…"
+        self.battery_led_applied = None   # (rgb, profile) last written by Battery life
 
         self.icon = QSystemTrayIcon(battery_icon(None), app)
         self.worker = Worker()
@@ -288,7 +291,8 @@ class Tray(QObject):
         # Lighting
         lm = self.light_menu
         self._header(lm, "Effect")
-        self.led_mode_acts = self._radio(lm, list(P.LED_MODES.items()), self.pick_led_mode)
+        self.led_mode_acts = self._radio(lm, list(P.LED_MODES.items())
+                                         + [(BATTERY_LIFE, BATTERY_LIFE_LABEL)], self.pick_led_mode)
         lm.addSeparator()
         self._header(lm, "Brightness")
         self.bright_acts = self._radio(lm, BRIGHTNESS, self.pick_brightness)
@@ -344,14 +348,16 @@ class Tray(QObject):
             a.setText(f"Preset {i + 1}: {st.dpi[i]}{active}  …")
 
         led = st.led
-        self.light_menu.setTitle(f"Lighting: {P.LED_MODES.get(led.mode, '?')}"
-                                 + (" (off)" if led.brightness == 0 else ""))
-        self._check(self.led_mode_acts, led.mode)
+        battery_led = self.cfg["battery_led"]
+        effect = "Battery life" if battery_led else P.LED_MODES.get(led.mode, '?')
+        self.light_menu.setTitle(f"Lighting: {effect}" + (" (off)" if led.brightness == 0 else ""))
+        self._check(self.led_mode_acts, BATTERY_LIFE if battery_led else led.mode)
         self._check(self.bright_acts, led.brightness)
-        has_colour = led.mode in P.LED_MODES_WITH_COLOR
+        has_colour = led.mode in P.LED_MODES_WITH_COLOR and not battery_led
         self.colour_act.setEnabled(has_colour)
-        self.colour_act.setIcon(swatch(led.rgb) if has_colour else QIcon())
+        self.colour_act.setIcon(swatch(led.rgb) if has_colour or battery_led else QIcon())
         self.colour_act.setText("Colour…" if has_colour
+                                else "Colour: set by battery level" if battery_led
                                 else "Colour: Static, Breathing or Reactive only")
 
         changed_any = False
@@ -376,6 +382,11 @@ class Tray(QObject):
             self.write(P.Mouse.set_dpi, st.active_dpi, dpi)
 
     def pick_led_mode(self, mode: int) -> None:
+        if mode == BATTERY_LIFE:
+            self.set_battery_led(True)
+            return
+        if self.cfg["battery_led"]:
+            self.set_battery_led(False)
         if self.state:
             led = self.state.led
             rgb = led.rgb
@@ -431,6 +442,31 @@ class Tray(QObject):
             self.worker.write(P.Mouse.set_led, led.mode, led.brightness or 50,
                               (c.red(), c.green(), c.blue()))
 
+    def set_battery_led(self, on: bool) -> None:
+        self.cfg["battery_led"] = on
+        save_config(self.cfg)
+        self.battery_led_applied = None
+        if on:
+            self.apply_battery_led()
+        self.render_settings()
+
+    def apply_battery_led(self) -> None:
+        """Battery life effect: make the mouse static, coloured by the charge level."""
+        st, r = self.state, self.last
+        if not (self.cfg["battery_led"] and st and r):
+            return
+        rgb = P.battery_rgb(r.percent)
+        if all(z.mode == P.LED_STATIC and z.rgb == rgb for z in st.leds or [st.led]):
+            self.battery_led_applied = (rgb, st.profile)
+            return
+        # Only write once per colour/profile so a read-back mismatch can't loop
+        # (and onboard memory isn't rewritten needlessly).
+        if self.battery_led_applied == (rgb, st.profile):
+            return
+        self.battery_led_applied = (rgb, st.profile)
+        brightness = st.led.brightness if st.led.mode == P.LED_STATIC else (st.led.brightness or 50)
+        self.worker.write(P.Mouse.set_led, P.LED_STATIC, brightness, rgb)
+
     def set_cfg(self, key: str, value: int) -> None:
         self.cfg[key] = value
         save_config(self.cfg)
@@ -445,6 +481,7 @@ class Tray(QObject):
         if st is not None:
             unchanged = st == self.state
             self.state, self.state_time, self.state_error = st, time.time(), ""
+            self.apply_battery_led()
             if unchanged:
                 return      # don't churn the menu layout while it's open
         else:
@@ -470,6 +507,7 @@ class Tray(QObject):
             self.last, self.last_time = reading, time.time()
             self.render()
             self.check_alerts()
+            self.apply_battery_led()
             # poll faster while charging so "fully charged" shows up promptly
             self.schedule(min(interval, 120) if reading.charging else interval)
             if self.state is None:

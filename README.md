@@ -13,6 +13,8 @@ stand-in for Armoury Crate.
 - DPI — quick-set the current DPI, or edit any of the 4 presets the DPI button cycles through
 - Lighting — effect (Static, Breathing, Colour cycle, Rainbow wave, Reactive, Battery level),
   brightness, colour picker
+- Battery life lighting — the tray app keeps the mouse on a static colour that fades smoothly
+  from green (full) through yellow (50 %) to red (≤10 %), updated on every battery check
 - Buttons — remap any button except left click; "Restore default buttons"
 - Performance — button response (debounce 4–32 ms), angle snapping
 - Tray settings — battery check interval, low-battery alert threshold
